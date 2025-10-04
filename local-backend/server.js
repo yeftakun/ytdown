@@ -7,6 +7,10 @@ const execAsync = promisify(exec);
 const app = express();
 const PORT = 3500;
 
+// yt-dlp configuration
+const YTDLP_PATH = 'C:\\Users\\yefta\\AppData\\Roaming\\Python\\Python312\\Scripts\\yt-dlp.exe';
+// 'C:\\Users\\yefta\\AppData\\Roaming\\Python\\Python312\\Scripts\\yt-dlp.exe';
+
 // Simple in-memory cache with TTL
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -138,14 +142,22 @@ app.get('/api/v1/preview/:videoId', async (req, res) => {
     const startTime = Date.now();
     
     // Super fast command - only title and duration
-    const command = `yt-dlp --get-title --get-duration --no-warnings "${videoUrl}"`;
+    const command = `"${YTDLP_PATH}" --get-title --get-duration --no-warnings "${videoUrl}"`;
     console.log(`🔍 Running command: ${command}`);
     
     try {
-      const { stdout } = await execAsync(command, { timeout: 15000 });
+      const { stdout, stderr } = await execAsync(command, { 
+        timeout: 15000,
+        shell: true,
+        windowsHide: true
+      });
       const endTime = Date.now();
       console.log(`⚡ Preview fetched in ${endTime - startTime}ms`);
       console.log(`📝 Raw output: ${JSON.stringify(stdout)}`);
+      
+      if (stderr) {
+        console.log(`⚠️ stderr: ${stderr}`);
+      }
       
       const lines = stdout.trim().split('\n');
       
@@ -178,8 +190,13 @@ app.get('/api/v1/preview/:videoId', async (req, res) => {
     // Try basic fallback with just --get-title
     try {
       const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const fallbackCommand = `yt-dlp --get-title --no-warnings "${videoUrl}"`;
-      const { stdout } = await execAsync(fallbackCommand, { timeout: 8000 });
+      const fallbackCommand = `"${YTDLP_PATH}" --get-title --no-warnings "${videoUrl}"`;
+      console.log(`🔄 Fallback command: ${fallbackCommand}`);
+      const { stdout } = await execAsync(fallbackCommand, { 
+        timeout: 8000,
+        shell: true,
+        windowsHide: true 
+      });
       const title = stdout.trim().split('\n')[0] || 'Loading...';
       
       const fallbackPreview = {
