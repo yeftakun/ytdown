@@ -1,0 +1,127 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YTDown</title>
+  <style>
+    body {
+      min-width: 320px;
+      font-family: "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #111827;
+      color: #f9fafb;
+    }
+
+    h1 {
+      font-size: 18px;
+      margin: 0 0 12px;
+    }
+
+    form {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    input[type="url"],
+    input[type="text"] {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #374151;
+      background: #1f2937;
+      color: inherit;
+    }
+
+    button[type="submit"],
+    button[type="button"] {
+      padding: 10px;
+      border: none;
+      border-radius: 999px;
+      font-weight: 600;
+      cursor: pointer;
+      background: linear-gradient(135deg, #f97316, #ef4444);
+      color: #fff;
+    }
+
+    button[disabled] {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    #status {
+      min-height: 18px;
+      font-size: 12px;
+    }
+
+    #status.error {
+      color: #fca5a5;
+    }
+
+    #status.success {
+      color: #bbf7d0;
+    }
+
+    details {
+      font-size: 11px;
+      color: #d1d5db;
+      margin-top: 4px;
+    }
+
+    details .hint {
+      font-size: 11px;
+      margin: 4px 0 8px;
+      color: #94a3b8;
+    }
+
+    .actions-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .actions-row button {
+      flex: 1;
+      font-size: 12px;
+      padding: 8px;
+      background: #2563eb;
+    }
+
+    .actions-row button.secondary {
+      background: #374151;
+      color: #e5e7eb;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>YTDown</h1>
+    <form id="download-form">
+      <label for="video-url">Link Video YouTube</label>
+      <input id="video-url" type="url" name="videoUrl" placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ" required />
+      <button type="submit">Download</button>
+    </form>
+    <p id="status"></p>
+    <details>
+      <summary>Tips</summary>
+      <p>Gunakan link <code>watch</code>, <code>shorts</code>, atau <code>youtu.be</code>. File akan diunduh menggunakan penyedia pihak ketiga (<code>piped.video</code>). Anda dapat menggantinya lewat konfigurasi di bagian <em>Pengaturan lanjutan</em>.</p>
+    </details>
+    <details>
+      <summary>Pengaturan lanjutan</summary>
+      <label for="provider-template">Template API stream</label>
+      <input id="provider-template" type="text" placeholder="https://piped.video/api/v1/streams/{videoId}" />
+      <p class="hint">Gunakan placeholder <code>{videoId}</code> sebagai lokasi ID video. Contoh: <code>https://server-anda/api/streams/{videoId}</code> atau <code>http://localhost:3000/download?target={videoId}</code>.</p>
+      <div class="actions-row">
+        <button type="button" id="save-provider" class="secondary">Simpan</button>
+        <button type="button" id="test-provider">Tes</button>
+      </div>
+    </details>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

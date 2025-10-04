@@ -1,0 +1,43 @@
+﻿{
+  "name": "YTDown",
+  "version": "0.1.0",
+  "manifest_version": 3,
+  "description": "Tambahkan tombol Download YouTube dan popup untuk mengunduh video.",
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://*.youtube.com/*",
+    "http://localhost:3500/*",
+    "https://piped.video/*",
+    "https://pipedapi.kavin.rocks/*",
+    "https://piped.projectsegfau.lt/*",
+    "https://piped.syncpundit.io/*",
+    "https://piped.api.privacydev.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "YTDown - Choose Quality & Download",
+    "default_popup": "popup-new.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/watch*",
+        "https://m.youtube.com/watch*"
+      ],
+      "js": [
+        "contentScript-new.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
