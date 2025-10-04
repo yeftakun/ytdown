@@ -11,7 +11,7 @@ const PORT = 3500;
 const YTDLP_PATH = 'C:\\Users\\yefta\\AppData\\Roaming\\Python\\Python312\\Scripts\\yt-dlp.exe';
 
 // Helper function to execute yt-dlp with multiple fallbacks
-async function executeYtDlp(args, timeout = 15000) {
+async function executeYtDlp(args, timeout = 20000) {
   const videoUrl = args[args.length - 1]; // Last argument is always the URL
   const baseArgs = args.slice(0, -1); // All args except URL
   
@@ -185,7 +185,7 @@ app.get('/api/v1/preview/:videoId', async (req, res) => {
       // Use new executeYtDlp function with fallbacks
       const { stdout, stderr } = await executeYtDlp(
         ['--get-title', '--get-duration', '--no-warnings', videoUrl], 
-        15000
+        20000
       );
       
       const endTime = Date.now();
