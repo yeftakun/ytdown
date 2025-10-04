@@ -329,97 +329,118 @@ app.get('/api/v1/download/:videoId', async (req, res) => {
   }
 });
 
-// Convert yt-dlp format to quality selector format
-function convertToQualitySelector(videoInfo) {
-  const availableQualities = [];
-  const audioStreams = [];
+// Smart merging function for video + audio combinations
+function createMergedQualities(videoInfo) {
+  const videoOnlyFormats = [];
+  const audioFormats = [];
+  const progressiveFormats = [];
   
+  // Separate formats by type
   if (videoInfo.formats && Array.isArray(videoInfo.formats)) {
-    // Group formats by quality and fps
-    const qualityMap = new Map();
-    
     for (const format of videoInfo.formats) {
-      // Skip formats without URL or HLS/DASH formats
-      if (!format.url || format.protocol === 'm3u8_native' || format.protocol === 'http_dash_segments') {
+      if (!format.url || format.url.includes('.m3u8') || format.url.includes('manifest')) {
         continue;
       }
       
-      // Skip HLS manifest URLs (*.m3u8)
-      if (format.url.includes('.m3u8') || format.url.includes('manifest')) {
-        continue;
-      }
-      
-      // Process video formats
-      if (format.vcodec !== 'none' && format.height) {
-        const height = format.height;
-        const fps = format.fps || 30;
-        const hasAudio = format.acodec !== 'none';
-        const ext = format.ext || 'mp4';
-        const filesize = format.filesize || format.filesize_approx || null;
-        
-        const qualityKey = `${height}p_${fps}fps`;
-        
-        if (!qualityMap.has(qualityKey) || hasAudio) {
-          qualityMap.set(qualityKey, {
-            height: height,
-            fps: fps,
-            quality: `${height}p ${fps}fps`,
-            url: format.url,
-            format_id: format.format_id,
-            ext: ext,
-            hasAudio: hasAudio,
-            videoOnly: !hasAudio,
-            filesize: filesize,
-            filesizeHuman: filesize ? formatFileSize(filesize) : 'Unknown',
-            vcodec: format.vcodec,
-            acodec: format.acodec || 'none',
-            tbr: format.tbr,
-            vbr: format.vbr,
-            abr: format.abr,
-            container: ext
-          });
-        }
-      }
-      
-      // Collect audio streams for video-only formats
-      if (format.vcodec === 'none' && format.acodec !== 'none') {
-        audioStreams.push({
-          url: format.url,
-          format_id: format.format_id,
-          ext: format.ext,
-          abr: format.abr,
-          acodec: format.acodec,
-          quality: format.abr ? `${format.abr}kbps` : 'audio'
-        });
+      if (format.vcodec !== 'none' && format.acodec !== 'none') {
+        // Progressive (video + audio combined)
+        progressiveFormats.push(format);
+      } else if (format.vcodec !== 'none' && format.acodec === 'none') {
+        // Video only
+        videoOnlyFormats.push(format);
+      } else if (format.vcodec === 'none' && format.acodec !== 'none') {
+        // Audio only
+        audioFormats.push(format);
       }
     }
-    
-    // Convert map to array and sort by quality
-    availableQualities.push(...qualityMap.values());
-    availableQualities.sort((a, b) => {
-      // Sort by height first, then by fps
-      if (a.height !== b.height) {
-        return b.height - a.height;
-      }
-      return b.fps - a.fps;
-    });
-    
-    // Find best audio stream for video-only formats
-    const bestAudio = audioStreams.length > 0 
-      ? audioStreams.reduce((best, current) => 
-          (current.abr || 0) > (best.abr || 0) ? current : best
-        ) 
-      : null;
-    
-    // Add audio URL to video-only formats
-    availableQualities.forEach(quality => {
-      if (quality.videoOnly && bestAudio) {
-        quality.audioUrl = bestAudio.url;
-        quality.audioFormat = bestAudio.ext;
-        quality.audioBitrate = bestAudio.abr;
-      }
-    });
   }
+  
+  // Find best audio
+  const bestAudio = audioFormats.length > 0 
+    ? audioFormats.reduce((best, current) => 
+        (current.abr || 0) > (best.abr || 0) ? current : best
+      ) 
+    : null;
+  
+  const mergedQualities = [];
+  
+  // Add progressive formats first (these have audio built-in)
+  progressiveFormats.forEach(format => {
+    if (format.height) {
+      mergedQualities.push({
+        height: format.height,
+        fps: format.fps || 30,
+        quality: `${format.height}p ${format.fps || 30}fps`,
+        url: format.url,
+        format_id: format.format_id,
+        ext: format.ext || 'mp4',
+        hasAudio: true,
+        videoOnly: false,
+        filesize: format.filesize || format.filesize_approx,
+        filesizeHuman: formatFileSize(format.filesize || format.filesize_approx),
+        vcodec: format.vcodec,
+        acodec: format.acodec,
+        container: format.ext || 'mp4',
+        type: 'progressive',
+        downloadMethod: 'direct'
+      });
+    }
+  });
+  
+  // Add video-only formats with audio merge capability
+  videoOnlyFormats.forEach(format => {
+    if (format.height && format.height >= 480 && bestAudio) {
+      mergedQualities.push({
+        height: format.height,
+        fps: format.fps || 30,
+        quality: `${format.height}p ${format.fps || 30}fps`,
+        url: format.url,
+        format_id: format.format_id,
+        ext: format.ext || 'mp4',
+        hasAudio: false, // Will be merged
+        videoOnly: true,
+        filesize: (format.filesize || format.filesize_approx || 0) + (bestAudio.filesize || bestAudio.filesize_approx || 0),
+        filesizeHuman: formatFileSize((format.filesize || format.filesize_approx || 0) + (bestAudio.filesize || bestAudio.filesize_approx || 0)),
+        vcodec: format.vcodec,
+        acodec: 'merged',
+        container: format.ext || 'mp4',
+        type: 'video-only',
+        downloadMethod: 'merge-required',
+        audioUrl: bestAudio.url,
+        audioFormat: bestAudio.ext,
+        audioBitrate: bestAudio.abr,
+        mergeInstruction: {
+          videoUrl: format.url,
+          audioUrl: bestAudio.url,
+          outputFormat: 'mp4'
+        }
+      });
+    }
+  });
+  
+  // Remove duplicates and sort
+  const uniqueQualities = mergedQualities.filter((quality, index, self) => 
+    index === self.findIndex(q => q.height === quality.height && q.fps === quality.fps)
+  );
+  
+  uniqueQualities.sort((a, b) => {
+    // Progressive formats first
+    if (a.type === 'progressive' && b.type !== 'progressive') return -1;
+    if (a.type !== 'progressive' && b.type === 'progressive') return 1;
+    
+    // Then by height
+    if (a.height !== b.height) return b.height - a.height;
+    
+    // Then by fps
+    return b.fps - a.fps;
+  });
+  
+  return uniqueQualities;
+}
+
+// Convert yt-dlp format to quality selector format
+function convertToQualitySelector(videoInfo) {
+  const availableQualities = createMergedQualities(videoInfo);
   
   return {
     success: true,
@@ -431,10 +452,15 @@ function convertToQualitySelector(videoInfo) {
     thumbnailUrl: videoInfo.thumbnail || '',
     viewCount: videoInfo.view_count || 0,
     uploadDate: videoInfo.upload_date || '',
-    availableQualities: availableQualities,
-    audioStreams: audioStreams,
+    availableQualities: availableQualities,  // Changed from qualities to availableQualities
     totalFormats: availableQualities.length,
-    videoId: extractVideoIdFromUrl(videoInfo.webpage_url) || ''
+    videoId: extractVideoIdFromUrl(videoInfo.webpage_url) || '',
+    qualityInfo: {
+      progressiveCount: availableQualities.filter(q => q.type === 'progressive').length,
+      mergeRequiredCount: availableQualities.filter(q => q.type === 'video-only').length,
+      maxProgressiveQuality: Math.max(...availableQualities.filter(q => q.type === 'progressive').map(q => q.height), 0),
+      maxMergeQuality: Math.max(...availableQualities.filter(q => q.type === 'video-only').map(q => q.height), 0)
+    }
   };
 }
 
@@ -605,6 +631,75 @@ app.use((error, req, res, next) => {
     error: 'Internal server error',
     details: error.message 
   });
+});
+
+// Merged download endpoint - get separate video+audio URLs for HD quality
+app.get('/api/v1/download-merged/:videoId', async (req, res) => {
+  const { videoId } = req.params;
+  const { height = '720', fps = '30' } = req.query;
+  
+  if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+    return res.status(400).json({ 
+      error: 'Invalid video ID format' 
+    });
+  }
+
+  try {
+    console.log(`🔄 Getting merged download for: ${videoId} at ${height}p ${fps}fps`);
+    
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    // Get video+audio URLs using format selector
+    const formatSelector = `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+    
+    const { stdout, stderr } = await executeYtDlp(
+      ['--get-url', '--no-warnings', '--format', formatSelector, videoUrl], 
+      20000
+    );
+
+    if (stderr && !stdout) {
+      throw new Error(`yt-dlp error: ${stderr}`);
+    }
+
+    const lines = stdout.trim().split('\n');
+    
+    if (lines.length >= 2) {
+      // Two URLs means video + audio separate
+      const videoUrl = lines[0];
+      const audioUrl = lines[1];
+      
+      res.json({
+        success: true,
+        type: 'merge-required',
+        videoUrl: videoUrl,
+        audioUrl: audioUrl,
+        videoId: videoId,
+        quality: `${height}p ${fps}fps`,
+        mergeInstruction: {
+          message: 'Download both URLs and merge with ffmpeg or similar tool',
+          command: `ffmpeg -i "${videoUrl}" -i "${audioUrl}" -c copy merged_${videoId}.mp4`
+        }
+      });
+    } else if (lines.length === 1) {
+      // One URL means progressive stream
+      res.json({
+        success: true,
+        type: 'progressive',
+        downloadUrl: lines[0],
+        videoId: videoId,
+        quality: `${height}p ${fps}fps`
+      });
+    } else {
+      throw new Error('No valid URLs returned');
+    }
+    
+  } catch (error) {
+    console.error('Error getting merged download:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to get merged download URLs',
+      details: error.message 
+    });
+  }
 });
 
 // 404 handler

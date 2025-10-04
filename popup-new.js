@@ -4,6 +4,30 @@ console.log('YTDown Quality Selector loaded');
 let currentVideoId = null;
 let videoData = null;
 
+// Utility functions
+function extractVideoId(input) {
+  if (!input) return null;
+  
+  // If already just the ID
+  if (input.length === 11 && !input.includes('/')) {
+    return input;
+  }
+  
+  // Extract from YouTube URL
+  const match = input.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
+function getCurrentVideoId() {
+  // Try to get from current tab URL if available
+  if (videoData && videoData.videoId) {
+    return videoData.videoId;
+  }
+  
+  // Return current video ID
+  return currentVideoId;
+}
+
 // DOM elements
 const statusEl = document.getElementById('status');
 const videoInfoEl = document.getElementById('video-info');
@@ -131,10 +155,18 @@ function createQualityItem(quality, index) {
   if (height >= 2160) badgeClass = 'uhd';
   else if (height >= 720) badgeClass = 'hd';
   
-  // Determine type indicator
-  const typeIndicator = quality.hasAudio 
-    ? '<span class="audio-indicator">Audio ✓</span>'
-    : '<span class="video-only-indicator">Video Only</span>';
+  // Determine type indicator with better audio status
+  let typeIndicator = '';
+  
+  if (quality.type === 'progressive') {
+    typeIndicator = '<span class="audio-indicator">Direct Download • Audio ✓</span>';
+  } else if (quality.type === 'video-only' && quality.downloadMethod === 'merge-required') {
+    typeIndicator = '<span class="merge-indicator">HD Quality • Merge Required</span>';
+  } else if (quality.hasAudio) {
+    typeIndicator = '<span class="audio-indicator">Audio ✓</span>';
+  } else {
+    typeIndicator = '<span class="video-only-indicator">Video Only</span>';
+  }
   
   item.innerHTML = `
     <button class="quality-button" data-quality-index="${index}">
@@ -177,27 +209,142 @@ async function downloadQuality(qualityIndex) {
     // Generate filename
     const title = sanitizeFileName(videoData.title || 'youtube-video');
     const extension = quality.container || 'mp4';
-    const filename = `${title} [${quality.quality}].${extension}`;
     
-    // Start download using Chrome Downloads API
-    const downloadId = await chrome.downloads.download({
-      url: quality.url,
-      filename: filename,
-      saveAs: true // Let user choose location
-    });
-    
-    console.log('Download started:', downloadId);
-    setStatus('success', `Download dimulai: ${quality.quality}`);
-    
-    // Close popup after successful download
-    setTimeout(() => {
-      window.close();
-    }, 1500);
+    // Handle different download methods
+    if (quality.downloadMethod === 'merge-required' && quality.audioUrl) {
+      // For merge-required videos, download video and audio separately
+      await downloadMergedQuality(quality, title, extension);
+    } else {
+      // For progressive videos, direct download
+      await downloadDirectQuality(quality, title, extension);
+    }
     
   } catch (error) {
     console.error('Download error:', error);
     showError(`Gagal download: ${error.message}`);
   }
+}
+
+async function downloadDirectQuality(quality, title, extension) {
+  const filename = `${title} [${quality.quality}].${extension}`;
+  
+  // Start download using Chrome Downloads API
+  const downloadId = await chrome.downloads.download({
+    url: quality.url,
+    filename: filename,
+    saveAs: true // Let user choose location
+  });
+  
+  console.log('Direct download started:', downloadId);
+  setStatus('success', `Download dimulai: ${quality.quality}`);
+  
+  // Close popup after successful download
+  setTimeout(() => {
+    window.close();
+  }, 1500);
+}
+
+async function downloadMergedQuality(quality, title, extension) {
+  // Option 1: Try to use server merge endpoint for one-click solution
+  try {
+    const videoId = extractVideoId(videoData.videoId || getCurrentVideoId());
+    if (videoId) {
+      const mergeResponse = await fetch(`http://localhost:3500/api/v1/download-merged/${videoId}?height=${quality.height}&fps=${quality.fps || 30}`);
+      
+      if (mergeResponse.ok) {
+        const mergeData = await mergeResponse.json();
+        
+        if (mergeData.success && mergeData.type === 'progressive') {
+          // Server found a progressive stream, use it
+          const filename = `${title} [${quality.quality}].${extension}`;
+          const downloadId = await chrome.downloads.download({
+            url: mergeData.downloadUrl,
+            filename: filename,
+            saveAs: true
+          });
+          
+          console.log('Progressive download via server:', downloadId);
+          setStatus('success', `Download dimulai: ${quality.quality} (with audio)`);
+          setTimeout(() => window.close(), 1500);
+          return;
+        }
+      }
+    }
+  } catch (serverError) {
+    console.log('Server merge not available, falling back to separate downloads:', serverError.message);
+  }
+  
+  // Option 2: Fallback to separate video+audio downloads
+  await downloadSeparateFiles(quality, title, extension);
+}
+
+async function downloadSeparateFiles(quality, title, extension) {
+  // For merge-required videos, provide both URLs and instructions
+  const videoFilename = `${title} [${quality.quality}] VIDEO-ONLY.${extension}`;
+  const audioFilename = `${title} [${quality.quality}] AUDIO-ONLY.${quality.audioFormat || 'webm'}`;
+  
+  // Download video file
+  const videoDownloadId = await chrome.downloads.download({
+    url: quality.url,
+    filename: videoFilename,
+    saveAs: true
+  });
+  
+  console.log('Video download started:', videoDownloadId);
+  setStatus('loading', `Download video dimulai, akan download audio...`);
+  
+  // Wait a moment then download audio file
+  setTimeout(async () => {
+    try {
+      const audioDownloadId = await chrome.downloads.download({
+        url: quality.audioUrl,
+        filename: audioFilename,
+        saveAs: false // Auto save to same directory
+      });
+      
+      console.log('Audio download started:', audioDownloadId);
+      
+      // Show merge instructions
+      setStatus('success', `Download selesai!`);
+      showMergeInstructions(quality, title);
+      
+    } catch (audioError) {
+      console.error('Audio download error:', audioError);
+      showError(`Video downloaded, tapi audio gagal: ${audioError.message}`);
+    }
+  }, 2000);
+}
+
+function showMergeInstructions(quality, title) {
+  // Create instruction popup/alert
+  const instructions = `
+DOWNLOAD SELESAI! 
+
+Video HD dan Audio terpisah sudah didownload.
+Untuk menggabungkan dengan audio, gunakan salah satu cara:
+
+🔧 FFMPEG (Command Line):
+ffmpeg -i "${title} [${quality.quality}] VIDEO-ONLY.${quality.container}" -i "${title} [${quality.quality}] AUDIO-ONLY.${quality.audioFormat}" -c copy "${title} [${quality.quality}] MERGED.mp4"
+
+🎬 VIDEO EDITOR:
+Import kedua file ke video editor favorit Anda (DaVinci Resolve, Adobe Premiere, etc)
+
+📱 ONLINE TOOL:
+Upload kedua file ke online video merger
+
+⚠️ Catatan: YouTube memisahkan video+audio untuk kualitas HD untuk menghemat bandwidth.
+  `;
+  
+  // Show in console for now, can be enhanced with modal later
+  console.log(instructions);
+  
+  // You could also create a modal or notification here
+  setTimeout(() => {
+    if (confirm('Download selesai! Klik OK untuk melihat instruksi penggabungan di console.')) {
+      console.log(instructions);
+    }
+    window.close();
+  }, 3000);
 }
 
 // Utility functions
