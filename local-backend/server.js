@@ -9,7 +9,43 @@ const PORT = 3500;
 
 // yt-dlp configuration
 const YTDLP_PATH = 'C:\\Users\\yefta\\AppData\\Roaming\\Python\\Python312\\Scripts\\yt-dlp.exe';
-// 'C:\\Users\\yefta\\AppData\\Roaming\\Python\\Python312\\Scripts\\yt-dlp.exe';
+
+// Helper function to execute yt-dlp with multiple fallbacks
+async function executeYtDlp(args, timeout = 15000) {
+  const videoUrl = args[args.length - 1]; // Last argument is always the URL
+  const baseArgs = args.slice(0, -1); // All args except URL
+  
+  const commands = [
+    // Try with full path and quotes
+    `"${YTDLP_PATH}" ${baseArgs.join(' ')} "${videoUrl}"`,
+    // Try with full path without quotes
+    `${YTDLP_PATH} ${baseArgs.join(' ')} "${videoUrl}"`,
+    // Try with just yt-dlp command
+    `yt-dlp ${baseArgs.join(' ')} "${videoUrl}"`
+  ];
+  
+  for (let i = 0; i < commands.length; i++) {
+    try {
+      console.log(`🔄 Attempt ${i + 1}: ${commands[i]}`);
+      const { stdout, stderr } = await execAsync(commands[i], {
+        timeout: timeout,
+        shell: true,
+        windowsHide: true
+      });
+      
+      if (stderr && stderr.trim()) {
+        console.log(`⚠️ stderr (attempt ${i + 1}): ${stderr.trim()}`);
+      }
+      
+      return { stdout, stderr };
+    } catch (error) {
+      console.log(`❌ Attempt ${i + 1} failed: ${error.message}`);
+      if (i === commands.length - 1) {
+        throw error; // Re-throw if all attempts failed
+      }
+    }
+  }
+}
 
 // Simple in-memory cache with TTL
 const cache = new Map();
@@ -72,30 +108,34 @@ app.get('/api/v1/streams/:videoId', async (req, res) => {
     // Use yt-dlp to get video information and stream URLs
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
     
-    // Optimized command - only get essential info faster
-    const command = `yt-dlp -j --no-warnings --no-playlist --skip-download --ignore-errors --prefer-free-formats "${videoUrl}"`;
-    
-    const { stdout, stderr } = await execAsync(command, {
-      timeout: 20000, // Reduced timeout to 20 seconds
-      maxBuffer: 1024 * 1024 * 5 // Reduced buffer size
-    });
+    try {
+      // Use new executeYtDlp function with fallbacks
+      const { stdout, stderr } = await executeYtDlp(
+        ['-j', '--no-warnings', '--no-playlist', '--skip-download', '--ignore-errors', '--prefer-free-formats', videoUrl], 
+        20000
+      );
 
-    if (stderr && !stdout) {
-      throw new Error(`yt-dlp error: ${stderr}`);
+      if (stderr && !stdout) {
+        throw new Error(`yt-dlp error: ${stderr}`);
+      }
+
+      const videoInfo = JSON.parse(stdout.trim());
+      
+      // Convert yt-dlp format to quality selector format
+      const qualitiesResponse = convertToQualitySelector(videoInfo);
+      
+      // Cache the result
+      setCache(cacheKey, qualitiesResponse);
+      
+      const processingTime = Date.now() - startTime;
+      console.log(`✅ Processed ${videoId} in ${processingTime}ms`);
+      
+      res.json(qualitiesResponse);
+      
+    } catch (ytdlpError) {
+      console.error('yt-dlp execution error:', ytdlpError.message);
+      throw ytdlpError; // Re-throw to be caught by outer catch
     }
-
-    const videoInfo = JSON.parse(stdout.trim());
-    
-    // Convert yt-dlp format to quality selector format
-    const qualitiesResponse = convertToQualitySelector(videoInfo);
-    
-    // Cache the result
-    setCache(cacheKey, qualitiesResponse);
-    
-    const processingTime = Date.now() - startTime;
-    console.log(`✅ Processed ${videoId} in ${processingTime}ms`);
-    
-    res.json(qualitiesResponse);
     
   } catch (error) {
     console.error('Error processing request:', error.message);
@@ -141,16 +181,13 @@ app.get('/api/v1/preview/:videoId', async (req, res) => {
     
     const startTime = Date.now();
     
-    // Super fast command - only title and duration
-    const command = `"${YTDLP_PATH}" --get-title --get-duration --no-warnings "${videoUrl}"`;
-    console.log(`🔍 Running command: ${command}`);
-    
     try {
-      const { stdout, stderr } = await execAsync(command, { 
-        timeout: 15000,
-        shell: true,
-        windowsHide: true
-      });
+      // Use new executeYtDlp function with fallbacks
+      const { stdout, stderr } = await executeYtDlp(
+        ['--get-title', '--get-duration', '--no-warnings', videoUrl], 
+        15000
+      );
+      
       const endTime = Date.now();
       console.log(`⚡ Preview fetched in ${endTime - startTime}ms`);
       console.log(`📝 Raw output: ${JSON.stringify(stdout)}`);
@@ -190,13 +227,13 @@ app.get('/api/v1/preview/:videoId', async (req, res) => {
     // Try basic fallback with just --get-title
     try {
       const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const fallbackCommand = `"${YTDLP_PATH}" --get-title --no-warnings "${videoUrl}"`;
-      console.log(`🔄 Fallback command: ${fallbackCommand}`);
-      const { stdout } = await execAsync(fallbackCommand, { 
-        timeout: 8000,
-        shell: true,
-        windowsHide: true 
-      });
+      console.log(`🔄 Trying fallback for: ${videoId}`);
+      
+      const { stdout } = await executeYtDlp(
+        ['--get-title', '--no-warnings', videoUrl], 
+        8000
+      );
+      
       const title = stdout.trim().split('\n')[0] || 'Loading...';
       
       const fallbackPreview = {
