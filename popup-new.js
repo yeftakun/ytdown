@@ -202,6 +202,56 @@ async function downloadQuality(qualityIndex) {
     showError('Kualitas tidak ditemukan');
     return;
   }
+
+  // Special handling for merge-required videos
+  if (quality.downloadMethod === 'merge-required') {
+    const progressiveAlternative = videoData.availableQualities.find(q => q.type === 'progressive');
+    
+    let confirmMessage = `
+⚠️  KUALITAS HD MEMERLUKAN MERGE
+
+${quality.quality} akan didownload sebagai 2 file terpisah:
+• Video: ${quality.filesizeHuman} (tanpa audio)  
+• Audio: ${Math.round((quality.audioBitrate || 130) / 8)} KB/s
+
+Setelah download, Anda perlu menggabungkannya dengan:
+✅ FFmpeg command (akan dicopy otomatis)
+✅ Video editor (DaVinci Resolve, etc)
+✅ Online merger tools
+
+────────────────────────────────────────`;
+
+    if (progressiveAlternative) {
+      confirmMessage += `
+🎯 ALTERNATIF MUDAH:
+${progressiveAlternative.quality} (${progressiveAlternative.filesizeHuman}) - Langsung dengan audio!
+
+────────────────────────────────────────`;
+    }
+
+    confirmMessage += `
+Lanjutkan download HD yang perlu merge?`;
+
+    const userConfirmed = confirm(confirmMessage);
+    
+    if (!userConfirmed) {
+      // If user cancels, suggest the progressive alternative
+      if (progressiveAlternative) {
+        const useAlternative = confirm(`
+🎯 Download alternatif ${progressiveAlternative.quality} saja?
+
+Kualitas lebih rendah tapi langsung dengan audio (tidak perlu merge).
+        `);
+        
+        if (useAlternative) {
+          const altIndex = videoData.availableQualities.findIndex(q => q.type === 'progressive');
+          downloadQuality(altIndex);
+          return;
+        }
+      }
+      return; // User cancelled completely
+    }
+  }
   
   try {
     setStatus('loading', `Memulai download ${quality.quality}...`);
@@ -283,68 +333,154 @@ async function downloadSeparateFiles(quality, title, extension) {
   const videoFilename = `${title} [${quality.quality}] VIDEO-ONLY.${extension}`;
   const audioFilename = `${title} [${quality.quality}] AUDIO-ONLY.${quality.audioFormat || 'webm'}`;
   
-  // Download video file
-  const videoDownloadId = await chrome.downloads.download({
-    url: quality.url,
-    filename: videoFilename,
-    saveAs: true
-  });
-  
-  console.log('Video download started:', videoDownloadId);
-  setStatus('loading', `Download video dimulai, akan download audio...`);
-  
-  // Wait a moment then download audio file
-  setTimeout(async () => {
-    try {
-      const audioDownloadId = await chrome.downloads.download({
-        url: quality.audioUrl,
-        filename: audioFilename,
-        saveAs: false // Auto save to same directory
-      });
-      
-      console.log('Audio download started:', audioDownloadId);
-      
-      // Show merge instructions
-      setStatus('success', `Download selesai!`);
-      showMergeInstructions(quality, title);
-      
-    } catch (audioError) {
-      console.error('Audio download error:', audioError);
-      showError(`Video downloaded, tapi audio gagal: ${audioError.message}`);
-    }
-  }, 2000);
+  try {
+    // Download video file first
+    setStatus('loading', `📹 Mendownload video ${quality.quality}...`);
+    const videoDownloadId = await chrome.downloads.download({
+      url: quality.url,
+      filename: videoFilename,
+      saveAs: true
+    });
+    
+    console.log('Video download started:', videoDownloadId);
+    setStatus('loading', `📹 Video dimulai, menunggu audio...`);
+    
+    // Wait a moment then download audio file
+    setTimeout(async () => {
+      try {
+        setStatus('loading', `🎵 Mendownload audio...`);
+        const audioDownloadId = await chrome.downloads.download({
+          url: quality.audioUrl,
+          filename: audioFilename,
+          saveAs: false // Auto save to same directory
+        });
+        
+        console.log('Audio download started:', audioDownloadId);
+        
+        // Show merge instructions with better feedback
+        setStatus('success', `✅ Download selesai! Cek instruksi merge.`);
+        showMergeInstructions(quality, title, videoFilename, audioFilename);
+        
+      } catch (audioError) {
+        console.error('Audio download error:', audioError);
+        showError(`📹 Video berhasil, tapi 🎵 audio gagal: ${audioError.message}`);
+      }
+    }, 2000);
+    
+  } catch (videoError) {
+    console.error('Video download error:', videoError);
+    showError(`📹 Video download gagal: ${videoError.message}`);
+  }
 }
 
-function showMergeInstructions(quality, title) {
-  // Create instruction popup/alert
+function showMergeInstructions(quality, title, videoFilename, audioFilename) {
+  // Create exact filenames as they will appear in downloads
+  const outputFile = `${title} [${quality.quality}] MERGED.mp4`;
+  const ffmpegCommand = `ffmpeg -i "${videoFilename}" -i "${audioFilename}" -c copy "${outputFile}"`;
+  
+  // Create detailed instruction modal
   const instructions = `
-DOWNLOAD SELESAI! 
+🎉 DOWNLOAD SELESAI! 
 
-Video HD dan Audio terpisah sudah didownload.
-Untuk menggabungkan dengan audio, gunakan salah satu cara:
+✅ File Video: ${videoFilename}
+✅ File Audio: ${audioFilename}
 
-🔧 FFMPEG (Command Line):
-ffmpeg -i "${title} [${quality.quality}] VIDEO-ONLY.${quality.container}" -i "${title} [${quality.quality}] AUDIO-ONLY.${quality.audioFormat}" -c copy "${title} [${quality.quality}] MERGED.mp4"
+═══════════════════════════════════════
 
-🎬 VIDEO EDITOR:
-Import kedua file ke video editor favorit Anda (DaVinci Resolve, Adobe Premiere, etc)
+🔧 CARA MENGGABUNGKAN:
 
-📱 ONLINE TOOL:
-Upload kedua file ke online video merger
+📋 1. COPY COMMAND INI (Recommended):
+${ffmpegCommand}
 
-⚠️ Catatan: YouTube memisahkan video+audio untuk kualitas HD untuk menghemat bandwidth.
+🎬 2. VIDEO EDITOR (User-Friendly):
+• DaVinci Resolve (Free): https://blackmagicdesign.com/products/davinciresolve
+• OpenShot (Free): https://www.openshot.org
+• Adobe Premiere Pro (Paid)
+
+🌐 3. ONLINE TOOLS (No Install):
+• Clideo: https://clideo.com/merge-video
+• Online Convert: https://www.online-convert.com
+• Kapwing: https://www.kapwing.com/tools/join-video
+
+⚡ 4. QUICK BATCH FILE (Windows):
+Buat file .bat dengan isi:
+@echo off
+cd /d "%~dp0"
+${ffmpegCommand}
+pause
+
+════════════════════════════════════════
+
+ℹ️ Kenapa terpisah? YouTube memisahkan video+audio HD untuk menghemat bandwidth.
+✨ Setelah digabung, Anda akan dapat file HD lengkap dengan audio!
   `;
   
-  // Show in console for now, can be enhanced with modal later
+  // Show in console for copy-paste
   console.log(instructions);
   
-  // You could also create a modal or notification here
-  setTimeout(() => {
-    if (confirm('Download selesai! Klik OK untuk melihat instruksi penggabungan di console.')) {
-      console.log(instructions);
-    }
-    window.close();
-  }, 3000);
+  // Auto-copy FFmpeg command to clipboard
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ffmpegCommand).then(() => {
+      console.log('✅ FFmpeg command berhasil dicopy ke clipboard!');
+      
+      // Show success notification
+      const userChoice = confirm(`
+🎉 DOWNLOAD SELESAI!
+
+Video HD dan audio sudah didownload terpisah.
+FFmpeg command sudah dicopy ke clipboard!
+
+📋 Paste command di terminal/cmd untuk merge:
+${ffmpegCommand}
+
+🌐 Atau gunakan online tools (lihat console untuk link)
+
+Klik OK untuk melihat semua opsi di console.
+Klik Cancel untuk menutup.
+      `);
+      
+      if (userChoice) {
+        console.log('%c📋 FFMPEG COMMAND (SUDAH DI CLIPBOARD):', 'color: #4CAF50; font-weight: bold; font-size: 14px;');
+        console.log(ffmpegCommand);
+        console.log('%c🌐 ONLINE TOOLS ALTERNATIF:', 'color: #2196F3; font-weight: bold; font-size: 14px;');
+        console.log('• Clideo: https://clideo.com/merge-video');
+        console.log('• Kapwing: https://www.kapwing.com/tools/join-video');
+      }
+      
+    }).catch(() => {
+      // Fallback if clipboard fails
+      showClipboardFallback(ffmpegCommand);
+    });
+  } else {
+    // Fallback if clipboard API not available
+    showClipboardFallback(ffmpegCommand);
+  }
+  
+  // Close popup after showing instructions
+  setTimeout(() => window.close(), 2000);
+}
+
+function showClipboardFallback(command) {
+  const userChoice = confirm(`
+🎉 DOWNLOAD SELESAI!
+
+Video HD dan audio sudah didownload terpisah.
+
+📋 Copy command ini untuk merge:
+${command}
+
+🌐 Atau gunakan online tools (lihat console untuk link)
+
+Klik OK untuk melihat semua opsi di console.
+  `);
+  
+  if (userChoice) {
+    console.log('%c📋 COPY COMMAND INI:', 'color: #4CAF50; font-weight: bold; font-size: 14px;');
+    console.log(command);
+    console.log('%c🌐 ONLINE TOOLS ALTERNATIF:', 'color: #2196F3; font-weight: bold; font-size: 14px;');
+    console.log('• Clideo: https://clideo.com/merge-video');
+    console.log('• Kapwing: https://www.kapwing.com/tools/join-video');
+  }
 }
 
 // Utility functions
