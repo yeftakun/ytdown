@@ -8,7 +8,7 @@ Ekstensi Chrome Download Video YouTube
 - Input URL buat link video yang mau di download.
 - File tersimpan lewat pengelola unduhan Chrome.
 
-## Cara Menggunakan
+## Cara Make
 
 1. Buka Chrome → `chrome://extensions`.
 2. Aktifkan **Developer mode** (kanan atas).
