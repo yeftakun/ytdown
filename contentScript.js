@@ -1,91 +1,53 @@
-﻿const BUTTON_ID = "yt-downloader-extension-button";
-const BUTTON_CLASS = "yt-downloader-extension-button";
-const BUTTON_CONTAINER_SELECTOR = "#top-level-buttons-computed";
+// YTDown Content Script - Simplified (no page buttons)
+console.log('YTDown content script loaded - Extension-only mode');
 
-init();
-
-function init() {
-  injectButton();
-  observePageChanges();
-  window.addEventListener("yt-navigate-finish", () => setTimeout(injectButton, 500));
-}
-
-function observePageChanges() {
-  const observer = new MutationObserver(() => {
-    if (!document.contains(getExistingButton())) {
-      injectButton();
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-}
-
-function injectButton() {
-  const container = document.querySelector(BUTTON_CONTAINER_SELECTOR);
-  if (!container || getExistingButton()) {
-    return;
-  }
-
-  const button = buildButton();
-  container.appendChild(button);
-}
-
-function buildButton() {
-  const button = document.createElement("button");
-  button.id = BUTTON_ID;
-  button.className = BUTTON_CLASS;
-  button.textContent = "Download Video";
-  button.style.cursor = "pointer";
-  button.style.marginLeft = "8px";
-  button.style.padding = "8px 12px";
-  button.style.borderRadius = "18px";
-  button.style.border = "none";
-  button.style.fontWeight = "600";
-  button.style.background = "#ff4e45";
-  button.style.color = "#fff";
-
-  button.addEventListener("click", async () => {
-    await handleDownloadClick(button);
-  });
-
-  return button;
-}
-
-async function handleDownloadClick(button) {
-  if (!button || button.dataset.loading === "true") {
-    return;
-  }
-
-  button.dataset.loading = "true";
-  button.disabled = true;
-  const originalText = button.textContent;
-  button.textContent = "Menyiapkan...";
-
-  try {
-    const currentUrl = window.location.href;
-    const response = await requestDownload(currentUrl, { saveAs: true, context: "page" });
-    if (!response?.success) {
-      throw new Error(response?.error || "Gagal memulai unduhan");
-    }
-
-    button.textContent = "Unduhan Dimulai";
+// Optional: Add visual indicator that extension is active
+function addExtensionIndicator() {
+  // Only add indicator if not already exists
+  if (document.getElementById('ytdown-indicator')) return;
+  
+  const indicator = document.createElement('div');
+  indicator.id = 'ytdown-indicator';
+  indicator.style.cssText = `
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: rgba(25, 118, 210, 0.9);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-family: system-ui;
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  `;
+  indicator.textContent = '🎬 YTDown Active';
+  
+  document.body.appendChild(indicator);
+  
+  // Show briefly when page loads
+  setTimeout(() => {
+    indicator.style.opacity = '1';
     setTimeout(() => {
-      button.textContent = originalText;
-    }, 2500);
-  } catch (error) {
-    console.warn("Download gagal", error);
-    alert(`Gagal memulai unduhan: ${error.message}`);
-    button.textContent = originalText;
-  } finally {
-    delete button.dataset.loading;
-    button.disabled = false;
+      indicator.style.opacity = '0';
+    }, 2000);
+  }, 1000);
+}
+
+// Add indicator when video page loads
+if (window.location.href.includes('watch?v=')) {
+  addExtensionIndicator();
+}
+
+// Listen for navigation changes (YouTube SPA)
+let currentUrl = window.location.href;
+setInterval(() => {
+  if (window.location.href !== currentUrl) {
+    currentUrl = window.location.href;
+    if (currentUrl.includes('watch?v=')) {
+      addExtensionIndicator();
+    }
   }
-}
-
-function getExistingButton() {
-  return document.getElementById(BUTTON_ID);
-}
-
-function requestDownload(videoUrl, options = {}) {
-  return chrome.runtime.sendMessage({ type: "DOWNLOAD_VIDEO", videoUrl, options });
-}
+}, 1000);

@@ -26,7 +26,7 @@
   },
   "action": {
     "default_title": "YTDown - Choose Quality & Download",
-    "default_popup": "popup-new.html"
+    "default_popup": "popup.html"
   },
   "content_scripts": [
     {
@@ -35,7 +35,7 @@
         "https://m.youtube.com/watch*"
       ],
       "js": [
-        "contentScript-new.js"
+        "contentScript.js"
       ],
       "run_at": "document_idle"
     }
