@@ -1,22 +1,12 @@
 ﻿# YTDown Chrome Extension
 
-Ekstensi Chrome sederhana untuk menambahkan tombol "Download Video" langsung di halaman YouTube serta menyediakan popup yang bisa menerima link YouTube secara manual.
+Ekstensi Chrome Download Video YouTube
 
 ## Fitur
 
-- Menyuntikkan tombol **Download Video** pada halaman `watch` YouTube desktop.
-- Popup ekstensi dengan input URL sehingga bisa mengunduh dari mana saja.
-- Mendukung beberapa penyedia stream progresif berbasis API Piped/yt-dlp dengan fallback otomatis.
-- Mengunduh menggunakan API `chrome.downloads` sehingga file tersimpan lewat pengelola unduhan Chrome.
-
-## Struktur
-
-```
-manifest.json        # Konfigurasi utama ekstensi (Manifest V3)
-background.js        # Service worker: ambil metadata stream & panggil download
-contentScript.js     # Menambahkan tombol pada halaman YouTube
-popup.html/js        # UI popup + pengaturan endpoint API
-```
+- **Download Video** dari halaman `watch` YouTube (desktop).
+- Input URL buat link video yang mau di download.
+- File tersimpan lewat pengelola unduhan Chrome.
 
 ## Cara Menggunakan
 
